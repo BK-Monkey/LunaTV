@@ -538,7 +538,7 @@ export function setupPeriodicUpdateCheck(intervalMinutes = 30): () => void {
   console.log(`设置定期更新检查，间隔: ${intervalMinutes} 分钟`);
 
   // 立即执行一次检查
-  checkWatchingUpdates();
+  // checkWatchingUpdates();
 
   // 设置定期检查
   const intervalId = setInterval(() => {
