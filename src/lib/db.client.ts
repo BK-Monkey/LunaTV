@@ -725,9 +725,11 @@ export async function getAllPlayRecords(forceRefresh = false): Promise<Record<st
   if (typeof window === 'undefined') {
     return {};
   }
-
   // 数据库存储模式：使用混合缓存策略（包括 redis 和 upstash）
   if (STORAGE_TYPE !== 'localstorage') {
+    // 记录上次后台更新时间，用于控制后台更新频率
+    let lastBackgroundUpdateTime = 0;
+    const BACKGROUND_UPDATE_INTERVAL = 60000; // 60秒后台更新间隔
     // 🔧 优化：如果强制刷新，跳过缓存直接获取最新数据
     if (forceRefresh) {
       try {
@@ -736,6 +738,7 @@ export async function getAllPlayRecords(forceRefresh = false): Promise<Record<st
           `/api/playrecords`
         );
         cacheManager.cachePlayRecords(freshData);
+        lastBackgroundUpdateTime = Date.now(); // 更新最后后台更新时间
         // 触发数据更新事件
         window.dispatchEvent(
           new CustomEvent('playRecordsUpdated', {
@@ -757,7 +760,11 @@ export async function getAllPlayRecords(forceRefresh = false): Promise<Record<st
 
     if (cachedData) {
       // 返回缓存数据，同时后台异步更新
-      fetchFromApi<Record<string, PlayRecord>>(`/api/playrecords`)
+      const now = Date.now();
+      if (now - lastBackgroundUpdateTime > BACKGROUND_UPDATE_INTERVAL) {
+        // 只在距离上次后台更新超过指定时间间隔时才发起新的请求
+        lastBackgroundUpdateTime = now; // 立即更新最后请求时间，防止短时间内重复请求
+        fetchFromApi<Record<string, PlayRecord>>(`/api/playrecords`)
         .then((freshData) => {
           // 只有数据真正不同时才更新缓存
           if (JSON.stringify(cachedData) !== JSON.stringify(freshData)) {
@@ -772,9 +779,9 @@ export async function getAllPlayRecords(forceRefresh = false): Promise<Record<st
         })
         .catch((err) => {
           console.warn('后台同步播放记录失败:', err);
-          triggerGlobalError('后台同步播放记录失败');
-        });
-
+          // triggerGlobalError('后台同步播放记录失败');
+        });    
+      }
       return cachedData;
     } else {
       // 缓存为空，直接从 API 获取并缓存
@@ -783,6 +790,7 @@ export async function getAllPlayRecords(forceRefresh = false): Promise<Record<st
           `/api/playrecords`
         );
         cacheManager.cachePlayRecords(freshData);
+        lastBackgroundUpdateTime = Date.now(); // 更新最后后台更新时间
         return freshData;
       } catch (err) {
         console.error('获取播放记录失败:', err);
