@@ -589,13 +589,47 @@ if (typeof window !== 'undefined') {
 
 // ---- 工具函数 ----
 /**
+ * 创建带超时的 fetch 请求
+ */
+function fetchWithTimeout(
+  url: string,
+  options: RequestInit = {},
+  timeout = 15000 // 默认15秒超时
+): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+      reject(new Error(`请求超时: ${url} (${timeout}ms)`));
+    }, timeout);
+
+    fetch(url, {
+      ...options,
+      signal: controller.signal,
+    })
+      .then((response) => {
+        clearTimeout(timeoutId);
+        resolve(response);
+      })
+      .catch((error) => {
+        clearTimeout(timeoutId);
+        if (error.name === 'AbortError') {
+          reject(new Error(`请求超时: ${url} (${timeout}ms)`));
+        } else {
+          reject(error);
+        }
+      });
+  });
+}
+
+/**
  * 通用的 fetch 函数，处理 401 状态码自动跳转登录
  */
 async function fetchWithAuth(
   url: string,
   options?: RequestInit
 ): Promise<Response> {
-  const res = await fetch(url, options);
+  const res = await fetchWithTimeout(url, options);
   if (!res.ok) {
     // 如果是 401 未授权，跳转到登录页面
     if (res.status === 401) {
@@ -619,9 +653,32 @@ async function fetchWithAuth(
   return res;
 }
 
-async function fetchFromApi<T>(path: string): Promise<T> {
-  const res = await fetchWithAuth(path);
-  return (await res.json()) as T;
+/**
+ * 带重试的 API 请求函数
+ */
+async function fetchFromApi<T>(path: string, retries = 2): Promise<T> {
+  let lastError: Error | null = null;
+
+  for (let i = 0; i <= retries; i++) {
+    try {
+      const res = await fetchWithAuth(path);
+      return (await res.json()) as T;
+    } catch (error) {
+      lastError = error as Error;
+      console.warn(`请求失败 (尝试 ${i + 1}/${retries + 1}):`, error);
+
+      // 如果不是最后一次尝试，等待后重试
+      if (i < retries) {
+        // 使用指数退避：第一次重试等待500ms，第二次等待1000ms
+        const delay = 500 * Math.pow(2, i);
+        console.log(`等待 ${delay}ms 后重试...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+
+  // 所有重试都失败，抛出最后一个错误
+  throw lastError || new Error('请求失败');
 }
 
 /**
@@ -784,17 +841,29 @@ export async function getAllPlayRecords(forceRefresh = false): Promise<Record<st
       }
       return cachedData;
     } else {
-      // 缓存为空，直接从 API 获取并缓存
+      // 缓存为空，直接从 API 获取并缓存（带重试）
       try {
+        console.log('📥 缓存为空，从API获取播放记录（带重试机制）');
         const freshData = await fetchFromApi<Record<string, PlayRecord>>(
-          `/api/playrecords`
+          `/api/playrecords`,
+          2 // 最多重试2次
         );
         cacheManager.cachePlayRecords(freshData);
         lastBackgroundUpdateTime = Date.now(); // 更新最后后台更新时间
+        console.log('✓ 成功获取并缓存播放记录');
         return freshData;
       } catch (err) {
-        console.error('获取播放记录失败:', err);
-        triggerGlobalError('获取播放记录失败');
+        console.error('❌ 获取播放记录失败（所有重试均失败）:', err);
+        const errorMessage = err instanceof Error ? err.message : '获取播放记录失败';
+
+        // 如果是超时错误，提供更友好的提示
+        if (errorMessage.includes('超时')) {
+          triggerGlobalError('网络连接超时，请检查网络或稍后重试');
+        } else {
+          triggerGlobalError('获取播放记录失败，请稍后重试');
+        }
+
+        // 返回空对象作为降级方案
         return {};
       }
     }
