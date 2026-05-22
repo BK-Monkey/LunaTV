@@ -4,7 +4,12 @@ const nextConfig = {
   // 生产环境始终使用 standalone 模式（Vercel/Docker/Render）
   // 本地开发时（NODE_ENV !== 'production'）不使用 standalone
   ...(process.env.NODE_ENV === 'production' ? { output: 'standalone' } : {}),
-
+  // 显式声明需要在构建时注入的环境变量（用于 EdgeOne Pages 等平台）
+  env: {
+    PASSWORD: process.env.PASSWORD || '',
+    USERNAME: process.env.USERNAME || 'admin',
+    NEXT_PUBLIC_STORAGE_TYPE: process.env.NEXT_PUBLIC_STORAGE_TYPE || 'localstorage',
+  },
   reactStrictMode: false,
 
   // Puppeteer/Chromium 相关包不进行 bundle（用于 Vercel serverless）
