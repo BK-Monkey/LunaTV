@@ -4,6 +4,9 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { getAuthInfoFromCookie } from '@/lib/auth';
 
+// 强制使用 Node.js Runtime，确保 process.env 能正确读取环境变量
+export const runtime = 'nodejs';
+
 // 信任网络配置缓存（从 API 获取）
 let trustedNetworkCache: { enabled: boolean; trustedIPs: string[]; blockAdminAccess: boolean } | null = null;
 let trustedNetworkCacheTime = 0;
